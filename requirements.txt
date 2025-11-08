@@ -1,0 +1,7 @@
+streamlit
+pillow
+easyocr
+numpy
+python-dotenv
+groq
+supabase
