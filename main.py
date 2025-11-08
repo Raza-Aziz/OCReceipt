@@ -1,177 +1,20 @@
 import streamlit as st
 import json
 import os
-from datetime import datetime
-from groq import Groq
-from PIL import Image
-import io
-from dotenv import load_dotenv
-import numpy as np
 
-# Alternative: Use EasyOCR (uncomment if preferred)
-import easyocr
-
-load_dotenv()
-
-GROQ_API_KEY = os.getenv('GROQ_API_KEY')
-
-# Initialize Groq client
-def init_groq():
-    api_key = GROQ_API_KEY
-    if api_key:
-        return Groq(api_key=api_key)
-    return None
-
-# Extract text using Tesseract OCR
-def extract_text_tesseract(image):
-    try:
-        # Convert to PIL Image if needed
-        if isinstance(image, bytes):
-            image = Image.open(io.BytesIO(image))
-        
-        # Perform OCR
-        # text = pytesseract.image_to_string(image)
-        # return text.strip(), None
-    except Exception as e:
-        return None, f"OCR Error: {str(e)}"
-
-def extract_text_easyocr(image_bytes):
-    try:
-        import numpy as np
-        reader = easyocr.Reader(['en'])
-        
-        # Convert bytes → numpy array (RGB)
-        image = np.array(Image.open(io.BytesIO(image_bytes)).convert("RGB"))
-        
-        # Perform OCR
-        results = reader.readtext(image)
-        
-        # Combine all detected text
-        text = '\n'.join([result[1] for result in results])
-        return text.strip(), None
-    except Exception as e:
-        return None, f"OCR Error: {str(e)}"
-
-# Parse extracted text using Groq LLM
-def parse_with_llm(client, ocr_text):
-    prompt = f"""You are a transaction receipt parser. Below is the raw text extracted from a payment receipt screenshot using OCR.
-
-RAW OCR TEXT:
-{ocr_text}
-
-Analyze this text and extract transaction information in a structured JSON format.
-
-Extract the following fields (use null if not found):
-- transaction_status: (e.g., "Successful", "Failed", "Pending")
-- sender_name: Full name of sender
-- sender_account: Account number or ID of sender
-- recipient_name: Full name of recipient
-- recipient_account: Account number or ID of recipient
-- amount: Numeric amount transferred (just the number)
-- currency: Currency symbol or code (e.g., "Rs", "PKR", "USD")
-- transaction_date: Date of transaction
-- transaction_time: Time of transaction
-- transaction_id: Transaction ID or reference number (like TID)
-- payment_method: Method/platform used (e.g., "EasyPaisa", "JazzCash", "Bank Transfer")
-- bank_name: Bank name if applicable
-- notes: Any additional notes or messages
-- fee: Transaction fee if mentioned
-- any_other_details: Any other relevant information
-
-Return ONLY a valid JSON object with these fields. Do not include any explanation or markdown formatting."""
-
-    try:
-        response = client.chat.completions.create(
-            model="openai/gpt-oss-20b",
-            messages=[
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            temperature=0,
-            max_tokens=1024,
-            response_format={"type": "json_object"}
-        )
-        
-        result = response.choices[0].message.content
-        
-        # Clean up response
-        result = result.strip()
-        if result.startswith('```json'):
-            result = result[7:]
-        if result.startswith('```'):
-            result = result[3:]
-        if result.endswith('```'):
-            result = result[:-3]
-        result = result.strip()
-        
-        transaction_data = json.loads(result)
-        transaction_data['extraction_timestamp'] = datetime.now().isoformat()
-        transaction_data['raw_ocr_text'] = ocr_text
-        
-        return transaction_data, None
-        
-    except json.JSONDecodeError as e:
-        return None, f"Failed to parse JSON response: {str(e)}\nRaw response: {result}"
-    except Exception as e:
-        return None, f"Error parsing with LLM: {str(e)}"
-
-# Save to JSON file
-def save_to_json(data, filename="transactions.json"):
-    try:
-        # Load existing data if file exists
-        if os.path.exists(filename):
-            with open(filename, 'r') as f:
-                existing_data = json.load(f)
-        else:
-            existing_data = []
-        
-        # Append new data
-        existing_data.append(data)
-        
-        # Save back to file
-        with open(filename, 'w') as f:
-            json.dump(existing_data, f, indent=2)
-        
-        return True, filename
-    except Exception as e:
-        return False, str(e)
+from utils import init_groq
+from save_to_json import save_to_json
+from extract_and_parse import extract_text_easyocr, parse_with_llm
 
 # Streamlit UI
 def main():
     st.set_page_config(page_title="Payment Receipt OCR", page_icon="💳", layout="wide")
     
-    st.title("💳 Payment Receipt OCR + LLM Parser")
+    st.title("💳 OCReceipt : Payment Receipt OCR + LLM Parser")
     st.markdown("Upload payment screenshots → Extract text with OCR → Parse with AI")
     
-    # API Key input in sidebar
-    with st.sidebar:
-        st.header("⚙️ Configuration")
-        api_key = st.text_input(
-            "Groq API Key",
-            type="password",
-            value=st.session_state.get('groq_api_key', ''),
-            help="Enter your Groq API key. Get one at https://console.groq.com"
-        )
+    with st.sidebar:       
         
-        if api_key:
-            st.session_state.groq_api_key = api_key
-            st.success("✓ API Key configured")
-        else:
-            st.warning("⚠️ Please enter your Groq API key")
-        
-        st.markdown("---")
-        
-        # OCR Engine selection
-        ocr_engine = st.radio(
-            "OCR Engine",
-            ["Tesseract", "EasyOCR"],
-            help="Choose your preferred OCR engine"
-        )
-        st.session_state.ocr_engine = ocr_engine
-        
-        st.markdown("---")
         st.markdown("### 📋 Supported Apps")
         st.markdown("""
         - EasyPaisa
@@ -209,17 +52,13 @@ def main():
     with col2:
         st.subheader("📊 Processing Results")
         
-        if uploaded_file and api_key:
+        if uploaded_file:
             if st.button("🔍 Extract & Parse", type="primary", width='stretch'):
                 # Step 1: OCR
                 with st.spinner("Step 1/2: Extracting text with OCR..."):
                     image_bytes = uploaded_file.read()
                     
-                    # Choose OCR engine
-                    if st.session_state.get('ocr_engine') == "EasyOCR":
-                        ocr_text, ocr_error = extract_text_easyocr(image_bytes)
-                    else:
-                        ocr_text, ocr_error = extract_text_tesseract(image_bytes)
+                    ocr_text, ocr_error = extract_text_easyocr(image_bytes)
                     
                     if ocr_error:
                         st.error(f"❌ {ocr_error}")
@@ -263,8 +102,6 @@ def main():
                                 st.error(f"Failed to save: {message}")
                     else:
                         st.error("Failed to initialize Groq client")
-        elif not api_key:
-            st.info("👈 Please enter your Groq API key in the sidebar")
         else:
             st.info("👆 Upload a screenshot to begin extraction")
     
@@ -305,6 +142,7 @@ def main():
                             st.text_area("Raw OCR Text", txn['raw_ocr_text'], height=300)
         else:
             st.info("No transactions saved yet")
+
 
 if __name__ == "__main__":
     main()

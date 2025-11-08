@@ -1,0 +1,21 @@
+[
+  {
+    "transaction_status": "Successful",
+    "sender_name": "XYZ",
+    "sender_account": "01234567891234",
+    "recipient_name": "ABC",
+    "recipient_account": "1234",
+    "amount": 5400,
+    "currency": "Rs",
+    "transaction_date": "07 Nov 2025",
+    "transaction_time": "12.46 AM",
+    "transaction_id": "123456",
+    "payment_method": "EasyPaisa",
+    "bank_name": "Telenor Bank",
+    "notes": "Transactions conducted after 09:00 PM and during holidays will show up in receiver's statement in next working day but balance will be updated in real time",
+    "fee": null,
+    "any_other_details": null,
+    "extraction_timestamp": "2025-11-08T22:59:00.250400",
+    "raw_ocr_text": "Funds Transfer\nTransaction Successful\nXYZ\n01234567891234\nMoney Transferred\nRs\n5,400\nto\nABC\nAccount\nNumber=\n1234\nEasyPaisa -\nTelenor Bank\n07 Nov 2025\n12.46 AM\nTransaction ID(TID): 123456\nTransactions conducted after 09:00 PM and during\nholidays will show up in receiver's statement in next\nworking day but balance will be updated in real time_\nScreenshot\nShare Receipt\nOk"
+  }
+]
