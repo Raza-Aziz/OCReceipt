@@ -4,16 +4,33 @@ import os
 
 from utils import init_groq
 from save_to_json import save_to_json
-from extract_and_parse import extract_text_easyocr, parse_with_llm
+from extract_and_parse import extract_text_easyocr, extract_text_easyocr_with_debug, parse_with_llm
+from preprocess import convert_cv_to_pil
 
 # Streamlit UI
 def main():
     st.set_page_config(page_title="Payment Receipt OCR", page_icon="💳", layout="wide")
     
     st.title("💳 OCReceipt : Payment Receipt OCR + LLM Parser")
-    st.markdown("Upload payment screenshots → Extract text with OCR → Parse with AI")
+    st.markdown("Upload payment screenshots → Preprocess with CV2 → Extract text with OCR → Parse with AI")
     
-    with st.sidebar:       
+    with st.sidebar:
+        st.header("⚙️ Settings")
+        
+        # Preprocessing options
+        use_preprocessing = st.checkbox(
+            "Enable Image Preprocessing", 
+            value=True,
+            help="Apply CV2 preprocessing for better OCR accuracy"
+        )
+        
+        show_preprocessing_steps = st.checkbox(
+            "Show Preprocessing Steps",
+            value=False,
+            help="Visualize intermediate preprocessing steps"
+        )
+        
+        st.markdown("---")
         
         st.markdown("### 📋 Supported Apps")
         st.markdown("""
@@ -30,9 +47,15 @@ def main():
         st.markdown("---")
         st.markdown("### 💡 How it works")
         st.markdown("""
-        1. **OCR**: Extracts raw text from image
-        2. **LLM**: Parses and structures the text
-        3. **JSON**: Saves organized data
+        1. **Preprocess**: CV2 enhancement
+           - Grayscale conversion
+           - Noise reduction
+           - Contrast enhancement
+           - Adaptive thresholding
+           - Deskewing
+        2. **OCR**: Extracts raw text
+        3. **LLM**: Parses with Pydantic
+        4. **JSON**: Saves validated data
         """)
     
     # Main content
@@ -47,31 +70,53 @@ def main():
         )
         
         if uploaded_file:
-            st.image(uploaded_file, caption="Uploaded Screenshot", width='stretch')
+            st.image(uploaded_file, caption="Original Screenshot", width='stretch')
     
     with col2:
         st.subheader("📊 Processing Results")
         
         if uploaded_file:
             if st.button("🔍 Extract & Parse", type="primary", width='stretch'):
+                image_bytes = uploaded_file.read()
+                
+                # Show preprocessing steps if enabled
+                if use_preprocessing and show_preprocessing_steps:
+                    with st.spinner("Preprocessing image..."):
+                        _, steps, error = extract_text_easyocr_with_debug(image_bytes)
+                        
+                        if steps and not error:
+                            st.success("✅ Preprocessing complete")
+                            
+                            # Display preprocessing steps
+                            with st.expander("🔬 Preprocessing Steps", expanded=True):
+                                step_names = list(steps.keys())
+                                cols = st.columns(2)
+                                
+                                for idx, step_name in enumerate(step_names):
+                                    col_idx = idx % 2
+                                    with cols[col_idx]:
+                                        st.caption(step_name.replace('_', ' ').title())
+                                        st.image(
+                                            convert_cv_to_pil(steps[step_name]), 
+                                            width='stretch'
+                                        )
+                
                 # Step 1: OCR
                 with st.spinner("Step 1/2: Extracting text with OCR..."):
-                    image_bytes = uploaded_file.read()
-                    
-                    ocr_text, ocr_error = extract_text_easyocr(image_bytes)
+                    ocr_text, ocr_error = extract_text_easyocr(image_bytes, use_preprocessing=use_preprocessing)
                     
                     if ocr_error:
                         st.error(f"❌ {ocr_error}")
                         st.stop()
                     
-                    st.success("✅ Text extracted with OCR")
+                    st.success(f"✅ Text extracted with {'preprocessed' if use_preprocessing else 'raw'} OCR")
                     
                     # Show extracted text in expander
                     with st.expander("📝 View Raw OCR Text"):
-                        st.text_area("Extracted Text", ocr_text, height=200)
+                        st.text_area("Extracted Text", ocr_text, height=200, key="ocr_text")
                 
                 # Step 2: LLM Parsing
-                with st.spinner("Step 2/2: Parsing with LLM..."):
+                with st.spinner("Step 2/2: Parsing with LLM (Structured Output)..."):
                     client = init_groq()
                     if client:
                         transaction_data, parse_error = parse_with_llm(client, ocr_text)
@@ -79,7 +124,7 @@ def main():
                         if parse_error:
                             st.error(f"❌ {parse_error}")
                         else:
-                            st.success("✅ Details parsed successfully!")
+                            st.success("✅ Details parsed & validated with Pydantic!")
                             
                             # Display extracted data
                             st.json(transaction_data)
@@ -139,7 +184,7 @@ def main():
                         st.json({k: v for k, v in txn.items() if k != 'raw_ocr_text'})
                     with col_b:
                         if 'raw_ocr_text' in txn:
-                            st.text_area("Raw OCR Text", txn['raw_ocr_text'], height=300)
+                            st.text_area("Raw OCR Text", txn['raw_ocr_text'], height=300, key=f"history_ocr_{idx}")
         else:
             st.info("No transactions saved yet")
 
